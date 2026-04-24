@@ -71,7 +71,7 @@ pip install flask flask-cors pyautogui google-generativeai webbrowser
 
 ---
 
-##👨‍💻 Author: 
+## 👨‍💻 Author: 
 
 **Developed and engineered by: -**
 **Tanmay Verma**
