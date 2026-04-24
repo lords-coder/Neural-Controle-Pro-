@@ -1,0 +1,1409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neural Control Pro - Voice, Gesture & Sign Language</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-secondary: #111827;
+            --bg-card: #1a2234;
+            --accent-cyan: #00f5d4;
+            --accent-pink: #f72585;
+            --accent-orange: #ff9e00;
+            --accent-purple: #9b5de5;
+            --text-primary: #e8eaed;
+            --text-muted: #6b7280;
+            --border-color: #2d3748;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            padding-bottom: 800px; 
+        }
+
+        .font-display { font-family: 'Orbitron', monospace; }
+
+        /* Background */
+        .bg-grid {
+            position: fixed; inset: 0;
+            background-image: 
+                linear-gradient(rgba(0, 245, 212, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 245, 212, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            pointer-events: none; z-index: 0;
+        }
+
+        .glow-orb {
+            position: fixed; width: 400px; height: 400px;
+            border-radius: 50%; filter: blur(120px);
+            opacity: 0.12; pointer-events: none; z-index: 0;
+        }
+        .orb-1 { top: -100px; left: -100px; background: var(--accent-cyan); animation: float 15s ease-in-out infinite; }
+        .orb-2 { bottom: -100px; right: -100px; background: var(--accent-pink); animation: float 18s ease-in-out infinite reverse; }
+        .orb-3 { top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--accent-purple); opacity: 0.08; animation: pulse-glow 8s ease-in-out infinite; }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(30px, -30px) scale(1.05); }
+            66% { transform: translate(-20px, 20px) scale(0.95); }
+        }
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 0.08; transform: translate(-50%, -50%) scale(1); }
+            50% { opacity: 0.15; transform: translate(-50%, -50%) scale(1.2); }
+        }
+
+        /* Custom Cursor */
+        .custom-cursor {
+            position: fixed; width: 28px; height: 28px;
+            border: 2px solid var(--accent-cyan); border-radius: 50%;
+            pointer-events: none; z-index: 9999;
+            transition: transform 0.08s ease, border-color 0.2s, width 0.15s, height 0.15s;
+            mix-blend-mode: difference;
+        }
+        .custom-cursor::before {
+            content: ''; position: absolute;
+            top: 50%; left: 50%; width: 8px; height: 8px;
+            background: var(--accent-cyan); border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+        .custom-cursor.clicking { transform: scale(0.7); border-color: var(--accent-pink); }
+        .custom-cursor.right-clicking { transform: scale(1.2); border-color: var(--accent-orange); }
+        .custom-cursor.dragging { border-color: #10b981; border-width: 4px; }
+        .custom-cursor.typing { 
+            width: 40px; height: 40px; 
+            border-color: var(--accent-purple);
+            box-shadow: 0 0 20px rgba(155, 93, 229, 0.5);
+        }
+        .cursor-trail {
+            position: fixed; width: 6px; height: 6px;
+            background: var(--accent-cyan); border-radius: 50%;
+            pointer-events: none; z-index: 9998;
+            opacity: 0.6; animation: trail-fade 0.4s forwards;
+        }
+        @keyframes trail-fade { to { opacity: 0; transform: scale(0); } }
+
+        /* Cards */
+        .control-card {
+            background: linear-gradient(135deg, var(--bg-card) 0%, rgba(26, 34, 52, 0.85) 100%);
+            border: 1px solid var(--border-color); border-radius: 16px;
+            backdrop-filter: blur(10px); transition: all 0.3s ease;
+        }
+        .control-card:hover { border-color: rgba(0, 245, 212, 0.25); }
+
+        /* Video Container */
+        .video-container {
+            position: relative; border-radius: 16px; overflow: hidden;
+            border: 2px solid var(--border-color); background: var(--bg-secondary);
+        }
+        .video-container video, .video-container canvas {
+            display: block; width: 100%; height: auto; transform: scaleX(-1);
+        }
+        #handCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+
+        /* Status Dots */
+        .status-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        .status-active { background: #10b981; box-shadow: 0 0 12px rgba(16, 185, 129, 0.6); }
+        .status-inactive { background: #ef4444; box-shadow: 0 0 12px rgba(239, 68, 68, 0.6); }
+        .status-listening { background: var(--accent-orange); box-shadow: 0 0 12px rgba(255, 158, 0, 0.6); animation: pulse-fast 0.5s ease-in-out infinite; }
+        .status-typing { background: var(--accent-purple); box-shadow: 0 0 12px rgba(155, 93, 229, 0.6); animation: pulse-fast 0.5s ease-in-out infinite; }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(1.1); } }
+        @keyframes pulse-fast { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.2); } }
+
+        /* Buttons */
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-cyan), #00c4a7);
+            color: var(--bg-primary); font-weight: 600;
+            padding: 12px 24px; border-radius: 10px; border: none;
+            cursor: pointer; transition: all 0.3s ease;
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0, 245, 212, 0.35); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        .btn-secondary {
+            background: transparent; color: var(--text-primary); font-weight: 500;
+            padding: 12px 24px; border-radius: 10px; border: 1px solid var(--border-color);
+            cursor: pointer; transition: all 0.3s ease;
+        }
+        .btn-secondary:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); background: rgba(0, 245, 212, 0.05); }
+
+        .btn-sign {
+            background: linear-gradient(135deg, var(--accent-purple), #7c3aed);
+            color: white; font-weight: 600;
+            padding: 12px 24px; border-radius: 10px; border: none;
+            cursor: pointer; transition: all 0.3s ease;
+        }
+        .btn-sign:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(155, 93, 229, 0.35); }
+        .btn-sign.active { box-shadow: 0 0 30px rgba(155, 93, 229, 0.6); }
+
+        /* Sign Language Panel */
+        .sign-panel {
+            background: linear-gradient(180deg, rgba(155, 93, 229, 0.1) 0%, transparent 100%);
+            border: 1px solid rgba(155, 93, 229, 0.3);
+        }
+
+        .letter-display {
+            font-size: 72px; font-weight: 900;
+            text-align: center; padding: 20px;
+            min-height: 120px; display: flex; align-items: center; justify-content: center;
+            background: rgba(0, 0, 0, 0.4); border-radius: 16px;
+            color: var(--accent-purple);
+            text-shadow: 0 0 40px rgba(155, 93, 229, 0.5);
+            transition: all 0.15s ease;
+        }
+
+        .typed-text {
+            font-family: 'Orbitron', monospace; font-size: 18px;
+            min-height: 60px; padding: 16px; background: rgba(0, 0, 0, 0.4);
+            border-radius: 12px; word-break: break-all;
+            border-left: 3px solid var(--accent-purple);
+        }
+
+        .confidence-bar {
+            height: 6px; border-radius: 3px; background: var(--border-color);
+            overflow: hidden;
+        }
+        .confidence-fill {
+            height: 100%; border-radius: 3px;
+            background: linear-gradient(90deg, var(--accent-purple), var(--accent-pink));
+            transition: width 0.2s ease;
+        }
+
+        /* Gesture Reference Grid */
+        .gesture-ref {
+            display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
+        }
+        .gesture-cell {
+            aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: 600; border-radius: 6px;
+            background: rgba(255,255,255,0.03); border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+        .gesture-cell.active {
+            background: rgba(155, 93, 229, 0.2);
+            border-color: var(--accent-purple);
+            color: var(--accent-purple);
+            transform: scale(1.1);
+        }
+
+        /* Command Log */
+        .command-log { max-height: 180px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
+        .command-log::-webkit-scrollbar { width: 6px; }
+        .command-log::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        .log-entry {
+            padding: 10px 14px; border-left: 3px solid var(--accent-cyan);
+            background: rgba(0, 245, 212, 0.03); margin-bottom: 8px;
+            border-radius: 0 8px 8px 0; animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+
+        /* Mode Tabs */
+        .mode-tabs {
+            display: flex; gap: 4px; padding: 4px; background: var(--bg-secondary);
+            border-radius: 12px;
+        }
+        .mode-tab {
+            flex: 1; padding: 10px 16px; text-align: center; border-radius: 8px;
+            font-weight: 500; font-size: 13px; cursor: pointer;
+            transition: all 0.3s; border: none; background: transparent;
+            color: var(--text-muted);
+        }
+        .mode-tab.active {
+            background: var(--accent-cyan); color: var(--bg-primary);
+            font-weight: 600;
+        }
+        .mode-tab.sign-active {
+            background: var(--accent-purple); color: white;
+        }
+
+        /* Voice Visualizer */
+        .voice-bar {
+            width: 4px; background: linear-gradient(to top, var(--accent-cyan), var(--accent-pink));
+            border-radius: 2px; transition: height 0.05s ease;
+        }
+
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative; width: 48px; height: 26px;
+            background: var(--border-color); border-radius: 13px;
+            cursor: pointer; transition: background 0.3s;
+        }
+        .toggle-switch.active { background: var(--accent-cyan); }
+        .toggle-switch::after {
+            content: ''; position: absolute; top: 3px; left: 3px;
+            width: 20px; height: 20px; background: white;
+            border-radius: 50%; transition: transform 0.3s;
+        }
+        .toggle-switch.active::after { transform: translateX(22px); }
+
+        button:focus-visible, input:focus-visible { outline: 2px solid var(--accent-cyan); outline-offset: 2px; }
+    </style>
+</head>
+<body>
+    <div class="bg-grid"></div>
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+    <div class="glow-orb orb-3"></div>
+
+    <div class="custom-cursor" id="customCursor"></div>
+
+    <div class="relative z-10 min-h-screen p-4 md:p-6">
+        <header class="mb-6">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                    <h1 class="font-display text-2xl md:text-3xl font-bold tracking-wider" style="color: var(--accent-cyan);">
+                        NEURAL CONTROL PRO
+                    </h1>
+                    <p class="text-sm mt-1" style="color: var(--text-muted);">
+                        Voice / Gesture / Sign Language Interface v3.2 (Debug Mode)
+                    </p>
+                </div>
+                
+                <div class="flex items-center gap-4 flex-wrap">
+                    <div class="flex items-center gap-2">
+                        <div class="status-dot status-inactive" id="cameraStatus"></div>
+                        <span class="text-xs">Camera</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="status-dot status-inactive" id="voiceStatus"></div>
+                        <span class="text-xs">Voice</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="status-dot status-inactive" id="handStatus"></div>
+                        <span class="text-xs">Hand Track</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="status-dot status-inactive" id="signStatus"></div>
+                        <span class="text-xs">Sign Type</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4 mode-tabs max-w-md">
+                <button class="mode-tab active" data-mode="cursor" aria-label="Cursor mode">
+                    Cursor Mode
+                </button>
+                <button class="mode-tab" data-mode="sign" aria-label="Sign language mode">
+                    Sign Language
+                </button>
+            </div>
+        </header>
+
+        <div class="main-grid grid grid-cols-1 lg:grid-cols-3 gap-5">
+            
+            <div class="lg:col-span-1 space-y-5">
+                <div class="control-card p-4">
+                    <h2 class="font-display text-base font-semibold mb-3 flex items-center gap-2">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                        Camera Feed
+                    </h2>
+                    
+                    <div class="video-container mb-3">
+                        <video id="videoElement" autoplay playsinline></video>
+                        <canvas id="handCanvas"></canvas>
+                        <div id="noCameraMsg" class="absolute inset-0 flex items-center justify-center bg-black/80">
+                            <div class="text-center p-4">
+                                <svg class="mx-auto mb-2" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--text-muted);"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                <p class="text-sm" style="color: var(--text-muted);">Camera Off</p>
+                            </div>
+                        </div>
+                        
+                        <div id="modeOverlay" class="absolute top-3 left-3 px-3 py-1 rounded-full text-xs font-semibold opacity-0 transition-opacity" style="background: rgba(0,0,0,0.7);">
+                            CURSOR MODE
+                        </div>
+                    </div>
+
+                    <button class="btn-primary w-full text-sm" id="startCameraBtn">
+                        Start Camera
+                    </button>
+                </div>
+
+                <div class="control-card p-4">
+                    <h2 class="font-display text-base font-semibold mb-3 flex items-center gap-2">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+                        <span id="detectTitle">Gesture Detected</span>
+                    </h2>
+                    
+                    <div class="letter-display" id="gestureDisplay">
+                        <span style="color: var(--text-muted); font-size: 18px;">Waiting...</span>
+                    </div>
+
+                    <div class="mt-3">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span style="color: var(--text-muted);">Confidence</span>
+                            <span id="confidenceValue" style="color: var(--accent-cyan);">0%</span>
+                        </div>
+                        <div class="confidence-bar">
+                            <div class="confidence-fill" id="confidenceFill" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <div class="mt-3 flex items-center justify-between">
+                        <span class="font-mono text-sm" style="color: var(--accent-cyan);" id="coordDisplay">X:0000 Y:0000</span>
+                        <span class="text-xs px-2 py-1 rounded" id="clickState" style="background: var(--border-color);">Ready</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-1 space-y-5">
+                <div class="control-card p-4">
+                    <h2 class="font-display text-base font-semibold mb-3 flex items-center gap-2">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                        Voice Control
+                    </h2>
+
+                    <div class="flex items-end justify-center gap-1 h-12 mb-3 bg-black/30 rounded-lg p-2" id="voiceVisualizer">
+                        </div>
+
+                    <div class="mb-3 p-3 rounded-lg bg-black/30 min-h-[50px] flex items-center justify-center">
+                        <p class="text-center text-sm" id="currentCommand" style="color: var(--text-muted);">Say a command (e.g. "Open Notepad")</p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <button class="btn-primary text-sm py-2" id="startVoiceBtn">Start Voice</button>
+                        <button class="btn-secondary text-sm py-2" id="stopVoiceBtn" disabled>Stop Voice</button>
+                    </div>
+                </div>
+
+                <div class="control-card sign-panel p-4" id="signPanel">
+                    <h2 class="font-display text-base font-semibold mb-3 flex items-center gap-2" style="color: var(--accent-purple);">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+                        Sign Language Typing
+                    </h2>
+
+                    <div class="text-center mb-3">
+                        <p class="text-xs mb-1" style="color: var(--text-muted);">Current Letter</p>
+                        <div class="letter-display" id="signLetterDisplay" style="min-height: 80px; font-size: 56px;">
+                            -
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="flex justify-between items-center mb-2">
+                            <p class="text-xs" style="color: var(--text-muted);">Typed Text</p>
+                            <div class="flex gap-1">
+                                <button class="text-xs px-2 py-1 rounded" id="clearTextBtn" style="background: var(--border-color);" title="Clear">Clear</button>
+                                <button class="text-xs px-2 py-1 rounded" id="backspaceBtn" style="background: var(--border-color);" title="Backspace">BS</button>
+                                <button class="text-xs px-2 py-1 rounded" id="spaceBtn" style="background: var(--border-color);" title="Space">Space</button>
+                            </div>
+                        </div>
+                        <div class="typed-text" id="typedTextOutput">|</div>
+                    </div>
+
+                    <div class="mt-3">
+                        <p class="text-xs mb-2" style="color: var(--text-muted);">Recent Letters</p>
+                        <div class="gesture-ref" id="recentLetters">
+                            </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-1 space-y-5">
+                <div class="control-card p-4">
+                    <h2 class="font-display text-base font-semibold mb-3 flex items-center gap-2">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        Quick Commands
+                    </h2>
+
+                    <div class="grid grid-cols-2 gap-2 mb-3">
+                        <button class="btn-secondary text-xs py-2 quick-cmd" data-command="open notepad">Notepad</button>
+                        <button class="btn-secondary text-xs py-2 quick-cmd" data-command="open calculator">Calculator</button>
+                        <button class="btn-secondary text-xs py-2 quick-cmd" data-command="open microsoft store">Store</button>
+                        <button class="btn-secondary text-xs py-2 quick-cmd" data-command="open settings">Settings</button>
+                        <button class="btn-secondary text-xs py-2 quick-cmd" data-command="open chrome">Chrome</button>
+                        <button class="btn-secondary text-xs py-2 quick-cmd" data-command="open file explorer">Explorer</button>
+                    </div>
+
+                    <button class="btn-sign w-full text-sm" id="toggleSignModeBtn">
+                        Enable Sign Language Mode
+                    </button>
+                </div>
+
+                <div class="control-card p-4">
+                    <h2 class="font-display text-base font-semibold mb-3 flex items-center gap-2">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                        Activity Log
+                    </h2>
+
+                    <div class="command-log" id="commandLog">
+                        <div class="text-center py-6" style="color: var(--text-muted);">
+                            <p class="text-sm">No activity yet</p>
+                        </div>
+                    </div>
+
+                    <button class="btn-secondary w-full mt-3 text-xs" id="clearLogBtn">Clear Log</button>
+                </div>
+
+                <div class="control-card p-4">
+                    <h2 class="font-display text-base font-semibold mb-3">Settings</h2>
+                    
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between py-2 border-b" style="border-color: var(--border-color);">
+                            <span class="text-sm">Cursor Smoothing</span>
+                            <div class="toggle-switch active" data-setting="smoothing" role="switch" tabindex="0"></div>
+                        </div>
+                        <div class="flex items-center justify-between py-2 border-b" style="border-color: var(--border-color);">
+                            <span class="text-sm">Pinch to Click</span>
+                            <div class="toggle-switch active" data-setting="pinchClick" role="switch" tabindex="0"></div>
+                        </div>
+                        <div class="flex items-center justify-between py-2 border-b" style="border-color: var(--border-color);">
+                            <span class="text-sm">Voice Feedback</span>
+                            <div class="toggle-switch" data-setting="voiceFeedback" role="switch" tabindex="0"></div>
+                        </div>
+                        <div class="flex items-center justify-between py-2 border-b" style="border-color: var(--border-color);">
+                            <span class="text-sm">Show Trails</span>
+                            <div class="toggle-switch active" data-setting="trails" role="switch" tabindex="0"></div>
+                        </div>
+                        <div class="flex items-center justify-between py-2">
+                            <span class="text-sm">Sensitivity</span>
+                            <input type="range" min="1" max="10" value="5" id="sensitivitySlider" class="w-20 accent-cyan-400">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-card p-4 mt-5">
+                    <h2 class="font-display text-base font-semibold mb-3 flex items-center gap-2" style="color: var(--accent-purple);">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/><path d="M12 12 2.1 7.1"/><path d="M12 12l9.9 4.9"/></svg>
+                        Gemini AI Agent
+                    </h2>
+                    
+                    <div id="chatBox" class="command-log bg-black/20 p-3 rounded-lg border border-gray-800 mb-3" style="min-height: 150px; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="font-size: 13px; color: var(--text-muted); text-align: center; margin-top: auto; margin-bottom: auto;">
+                            Say "Ask AI [question]"
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <input type="text" id="manualChatInput" class="flex-1 bg-black/40 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent-purple)]" placeholder="Message Gemini...">
+                        <button id="sendChatBtn" class="btn-secondary text-xs px-4 py-2" style="color: var(--accent-purple); border-color: var(--accent-purple);">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="mt-6 text-center pb-4">
+            <p class="text-xs" style="color: var(--text-muted);">
+                Modes: Cursor (move hand) | Sign Language (spell with fingers) | Voice ("Open [app]")
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        
+        // STATE INITIALIZATION
+        
+        
+        const state = {
+            cameraActive: false,
+            voiceActive: false,
+            handDetected: false,
+            currentMode: 'cursor', // 'cursor' or 'sign'
+            signModeEnabled: false,
+            settings: {
+                smoothing: true,
+                pinchClick: true,
+                voiceFeedback: false,
+                trails: true,
+                sensitivity: 5
+            },
+            cursorPos: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+            targetPos: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+            lastLeftClickState: false,
+            lastRightClickState: false,
+            lastDragState: false,
+            lastScrollTime: 0,
+            typedText: '',
+            currentLetter: null,
+            letterConfidence: 0,
+            recentLetters: [],
+            letterHoldTime: 0,
+            lastDetectedLetter: null,
+            commandHistory: []
+        };
+
+        // Application commands mapping
+        const appCommands = {
+            'notepad': 'notepad.exe',
+            'calculator': 'calc.exe',
+            'microsoft store': 'ms-windows-store:',
+            'store': 'ms-windows-store:',
+            'settings': 'ms-settings:',
+            'chrome': 'chrome',
+            'file explorer': 'explorer.exe',
+            'explorer': 'explorer.exe',
+            'cmd': 'cmd.exe',
+            'powershell': 'powershell.exe',
+            'paint': 'mspaint.exe',
+            'word': 'winword',
+            'excel': 'excel',
+            'edge': 'msedge'
+        };
+
+        
+        // DOM ELEMENTS
+        
+        
+        const $ = id => document.getElementById(id);
+        const elements = {
+            customCursor: $('customCursor'),
+            videoElement: $('videoElement'),
+            handCanvas: $('handCanvas'),
+            noCameraMsg: $('noCameraMsg'),
+            startCameraBtn: $('startCameraBtn'),
+            startVoiceBtn: $('startVoiceBtn'),
+            stopVoiceBtn: $('stopVoiceBtn'),
+            gestureDisplay: $('gestureDisplay'),
+            detectTitle: $('detectTitle'),
+            coordDisplay: $('coordDisplay'),
+            clickState: $('clickState'),
+            currentCommand: $('currentCommand'),
+            commandLog: $('commandLog'),
+            clearLogBtn: $('clearLogBtn'),
+            cameraStatus: $('cameraStatus'),
+            voiceStatus: $('voiceStatus'),
+            handStatus: $('handStatus'),
+            signStatus: $('signStatus'),
+            voiceVisualizer: $('voiceVisualizer'),
+            sensitivitySlider: $('sensitivitySlider'),
+            toggleSignModeBtn: $('toggleSignModeBtn'),
+            signLetterDisplay: $('signLetterDisplay'),
+            typedTextOutput: $('typedTextOutput'),
+            recentLetters: $('recentLetters'),
+            confidenceValue: $('confidenceValue'),
+            confidenceFill: $('confidenceFill'),
+            clearTextBtn: $('clearTextBtn'),
+            backspaceBtn: $('backspaceBtn'),
+            spaceBtn: $('spaceBtn'),
+            modeOverlay: $('modeOverlay')
+        };
+
+        // Initialize voice visualizer bars
+        for (let i = 0; i < 12; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'voice-bar';
+            bar.style.height = `${6 + Math.random() * 12}px`;
+            elements.voiceVisualizer.appendChild(bar);
+        }
+
+        // Initialize recent letters grid
+        for (let i = 0; i < 7; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'gesture-cell';
+            cell.textContent = '-';
+            cell.id = `recentCell${i}`;
+            elements.recentLetters.appendChild(cell);
+        }
+
+        
+        // CUSTOM CURSOR SYSTEM
+        
+        
+        function updateCursorPosition() {
+            const smoothingFactor = state.settings.smoothing ? 0.12 : 0.45;
+            
+            state.cursorPos.x += (state.targetPos.x - state.cursorPos.x) * smoothingFactor;
+            state.cursorPos.y += (state.targetPos.y - state.cursorPos.y) * smoothingFactor;
+
+            elements.customCursor.style.left = `${state.cursorPos.x}px`;
+            elements.customCursor.style.top = `${state.cursorPos.y}px`;
+
+            if (state.settings.trails && Math.random() > 0.88) {
+                createTrail(state.cursorPos.x, state.cursorPos.y);
+            }
+
+            requestAnimationFrame(updateCursorPosition);
+        }
+
+        function createTrail(x, y) {
+            const trail = document.createElement('div');
+            trail.className = 'cursor-trail';
+            trail.style.left = `${x}px`;
+            trail.style.top = `${y}px`;
+            document.body.appendChild(trail);
+            setTimeout(() => trail.remove(), 400);
+        }
+
+        updateCursorPosition();
+        document.body.style.cursor = 'none';
+
+        document.querySelectorAll('button, input, [role="switch"]').forEach(el => {
+            el.addEventListener('mouseenter', () => {
+                elements.customCursor.style.opacity = '0';
+                document.body.style.cursor = 'auto';
+            });
+            el.addEventListener('mouseleave', () => {
+                elements.customCursor.style.opacity = '1';
+                document.body.style.cursor = 'none';
+            });
+        });
+
+        
+        // SIGN LANGUAGE RECOGNITION SYSTEM
+        
+        
+        function getFingerStates(landmarks) {
+            const fingerTips = [4, 8, 12, 16, 20];
+            const fingerPips = [3, 6, 10, 14, 18];
+            const states = [];
+            
+            const thumbExtended = landmarks[4].x < landmarks[3].x; 
+            states.push(thumbExtended);
+
+            for (let i = 1; i < 5; i++) {
+                const extended = landmarks[fingerTips[i]].y < landmarks[fingerPips[i]].y;
+                states.push(extended);
+            }
+            return states;
+        }
+
+        function recognizeSignLetter(landmarks) {
+            const fingers = getFingerStates(landmarks);
+            const [thumb, index, middle, ring, pinky] = fingers;
+
+            if (!index && !middle && !ring && !pinky && thumb) return { letter: 'A', confidence: 0.85 };
+            if (index && middle && ring && pinky && !thumb) return { letter: 'B', confidence: 0.88 };
+            if (index && middle && ring && pinky && thumb) return { letter: 'C', confidence: 0.75 };
+            if (index && !middle && !ring && !pinky) return { letter: 'D', confidence: 0.82 };
+            if (!index && !middle && !ring && !pinky && !thumb) return { letter: 'E', confidence: 0.80 };
+            if (index && middle && ring && pinky && thumb) {
+                const thumbIndexDist = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
+                if (thumbIndexDist < 0.06) return { letter: 'F', confidence: 0.78 };
+            }
+            if (index && !middle && !ring && !pinky) return { letter: 'G', confidence: 0.72 };
+            if (index && middle && !ring && !pinky) return { letter: 'H', confidence: 0.70 };
+            if (!index && !middle && !ring && pinky) return { letter: 'I', confidence: 0.76 };
+            if (index && middle && !ring && !pinky && thumb) return { letter: 'K', confidence: 0.77 };
+            if (index && !middle && !ring && !pinky && thumb) return { letter: 'L', confidence: 0.86 };
+            if (!index && middle && ring && pinky) return { letter: 'M', confidence: 0.73 };
+            if (!index && middle && ring && !pinky) return { letter: 'N', confidence: 0.71 };
+            if (!index && !middle && !ring && !pinky && thumb) return { letter: 'O', confidence: 0.79 };
+            if (index && middle && !ring && !pinky && thumb) return { letter: 'P', confidence: 0.68 };
+            if (index && !middle && !ring && !pinky) return { letter: 'Q', confidence: 0.66 };
+            if (index && middle && !ring && !pinky) return { letter: 'R', confidence: 0.74 };
+            if (!index && !middle && !ring && !pinky && !thumb) return { letter: 'S', confidence: 0.81 };
+            if (!index && !middle && ring && pinky) return { letter: 'T', confidence: 0.69 };
+            if (index && middle && !ring && !pinky) {
+                const idxMidDist = Math.hypot(landmarks[8].x - landmarks[12].x, landmarks[8].y - landmarks[12].y);
+                if (idxMidDist < 0.04) return { letter: 'U', confidence: 0.80 };
+            }
+            if (index && middle && !ring && !pinky) return { letter: 'V', confidence: 0.87 };
+            if (index && middle && ring && !pinky) return { letter: 'W', confidence: 0.84 };
+            if (!index && !middle && !ring && !pinky) return { letter: 'X', confidence: 0.70 };
+            if (!index && !middle && !ring && pinky && thumb) return { letter: 'Y', confidence: 0.89 };
+            if (index && !middle && !ring && !pinky) return { letter: 'Z', confidence: 0.63 };
+            if (index && middle && ring && pinky && thumb) return { letter: ' ', confidence: 0.72, isSpace: true };
+
+            return { letter: null, confidence: 0 };
+        }
+
+        function processSignLanguage(landmarks) {
+            const result = recognizeSignLetter(landmarks);
+            
+            if (result.letter !== null && result.confidence > 0.6) {
+                state.currentLetter = result.letter;
+                state.letterConfidence = result.confidence;
+
+                if (result.isSpace || result.letter === ' ') {
+                    elements.signLetterDisplay.textContent = '␣';
+                    elements.signLetterDisplay.title = 'SPACE';
+                } else {
+                    elements.signLetterDisplay.textContent = result.letter;
+                    elements.signLetterDisplay.title = result.letter;
+                }
+
+                elements.confidenceValue.textContent = `${Math.round(result.confidence * 100)}%`;
+                elements.confidenceFill.style.width = `${result.confidence * 100}%`;
+
+                if (result.letter === state.lastDetectedLetter) {
+                    state.letterHoldTime += 16; 
+                } else {
+                    state.letterHoldTime = 0;
+                    state.lastDetectedLetter = result.letter;
+                }
+
+                if (state.letterHoldTime > 450 && state.letterHoldTime < 500) {
+                    addTypedLetter(result.letter === ' ' ? ' ' : result.letter);
+                }
+
+            } else {
+                state.currentLetter = null;
+                state.letterConfidence = 0;
+                state.letterHoldTime = 0;
+                state.lastDetectedLetter = null;
+                
+                elements.signLetterDisplay.textContent = '?';
+                elements.signLetterDisplay.title = 'Unknown gesture';
+                elements.confidenceValue.textContent = '0%';
+                elements.confidenceFill.style.width = '0%';
+            }
+        }
+
+        function addTypedLetter(letter) {
+            if (letter === ' ') {
+                state.typedText += ' ';
+            } else {
+                state.typedText += letter;
+            }
+
+            updateTypedTextDisplay();
+            state.recentLetters.unshift(letter === ' ' ? '␣' : letter);
+            if (state.recentLetters.length > 7) state.recentLetters.pop();
+            updateRecentLettersDisplay();
+            addLogEntry('Sign', `Typed: "${letter}"`);
+        }
+
+        function updateTypedTextDisplay() {
+            elements.typedTextOutput.textContent = state.typedText + '|';
+            elements.typedTextOutput.scrollLeft = elements.typedTextOutput.scrollWidth;
+        }
+
+        function updateRecentLettersDisplay() {
+            for (let i = 0; i < 7; i++) {
+                const cell = $(`recentCell${i}`);
+                if (cell) {
+                    cell.textContent = state.recentLetters[i] || '-';
+                    cell.classList.toggle('active', i === 0 && state.recentLetters.length > 0);
+                }
+            }
+        }
+
+        
+        // CAMERA & HAND TRACKING
+        
+        
+        let hands = null;
+        let cameraInstance = null;
+
+        async function initHandTracking() {
+            hands = new Hands({
+                locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(onHandResults);
+        }
+
+        function onHandResults(results) {
+            const canvas = elements.handCanvas;
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = results.image.width || 640;
+            canvas.height = results.image.height || 480;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                state.handDetected = true;
+                updateStatus('handStatus', true);
+                
+                const landmarks = results.multiHandLandmarks[0];
+
+                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+                    color: state.currentMode === 'sign' ? '#9b5de5' : '#00f5d4',
+                    lineWidth: 2
+                });
+                drawLandmarks(ctx, landmarks, {
+                    color: '#f72585',
+                    lineWidth: 1,
+                    radius: 4
+                });
+
+                if (state.currentMode === 'sign' && state.signModeEnabled) {
+                    processSignLanguage(landmarks);
+                    updateStatus('signStatus', true, true);
+                    elements.customCursor.classList.add('typing');
+                    elements.gestureDisplay.innerHTML = `<span>${state.currentLetter || '?'}</span>`;
+                    elements.detectTitle.textContent = 'Sign Letter';
+                } else {
+                    updateStatus('signStatus', false);
+                    elements.customCursor.classList.remove('typing');
+
+                    const thumbTip = landmarks[4];
+                    const indexTip = landmarks[8];
+                    const middleTip = landmarks[12];
+                    const ringTip = landmarks[16];
+                    const wrist = landmarks[0];
+
+                    const sensitivity = state.settings.sensitivity / 5;
+                    const x = (1 - indexTip.x) * window.innerWidth;
+                    const y = indexTip.y * window.innerHeight;
+
+                    state.targetPos.x = Math.max(0, Math.min(window.innerWidth, x));
+                    state.targetPos.y = Math.max(0, Math.min(window.innerHeight, y));
+
+                    elements.coordDisplay.textContent = `X:${String(Math.round(x)).padStart(4,'0')} Y:${String(Math.round(y)).padStart(4,'0')}`;
+
+                    const distIndex = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+                    const distMiddle = Math.hypot(thumbTip.x - middleTip.x, thumbTip.y - middleTip.y);
+                    const distRing = Math.hypot(thumbTip.x - ringTip.x, thumbTip.y - ringTip.y);
+
+                    const isLeftClicking = distIndex < 0.08;
+                    const isRightClicking = distMiddle < 0.08;
+                    const isDragging = distRing < 0.08;
+
+                    const fingers = getFingerStates(landmarks);
+                    let isScrollingUp = false;
+                    let isScrollingDown = false;
+                    
+                    if (!fingers[1] && !fingers[2] && !fingers[3] && !fingers[4]) { 
+                        if (thumbTip.y < wrist.y - 0.08) isScrollingUp = true;
+                        else if (thumbTip.y > wrist.y + 0.08) isScrollingDown = true;
+                    }
+
+                    if (state.settings.pinchClick) {
+                        if (isLeftClicking && !state.lastLeftClickState) performClick('left');
+                        state.lastLeftClickState = isLeftClicking;
+
+                        if (isRightClicking && !state.lastRightClickState) performClick('right');
+                        state.lastRightClickState = isRightClicking;
+                    }
+
+                    if (isDragging && !state.lastDragState) {
+                        elements.customCursor.classList.add('dragging');
+                        addLogEntry('Gesture', 'Drag Hold started');
+                    } else if (!isDragging && state.lastDragState) {
+                        elements.customCursor.classList.remove('dragging');
+                        addLogEntry('Gesture', 'Drag Hold released');
+                    }
+                    state.lastDragState = isDragging;
+
+                    const now = Date.now();
+                    if (now - state.lastScrollTime > 50) { 
+                        if (isScrollingUp) {
+                            window.scrollBy({top: -30, behavior: 'auto'});
+                            state.lastScrollTime = now;
+                        } else if (isScrollingDown) {
+                            window.scrollBy({top: 30, behavior: 'auto'});
+                            state.lastScrollTime = now;
+                        }
+                    }
+
+                    updateGestureDisplay(landmarks, isLeftClicking, isRightClicking, isDragging, isScrollingUp, isScrollingDown);
+                    elements.detectTitle.textContent = 'Gesture Detected';
+                }
+
+            } else {
+                state.handDetected = false;
+                updateStatus('handStatus', false);
+                updateStatus('signStatus', false);
+                elements.customCursor.classList.remove('typing', 'clicking', 'right-clicking', 'dragging');
+                
+                if (state.currentMode === 'sign') {
+                    elements.gestureDisplay.innerHTML = '<span style="color:var(--text-muted);font-size:18px;">No hand</span>';
+                    elements.signLetterDisplay.textContent = '-';
+                } else {
+                    elements.gestureDisplay.innerHTML = '<span style="color:var(--text-muted);font-size:18px;">No hand</span>';
+                }
+                elements.clickState.textContent = 'Ready';
+                elements.clickState.style.background = 'var(--border-color)';
+            }
+        }
+
+        function updateGestureDisplay(landmarks, isLeftClicking, isRightClicking, isDragging, isScrollingUp, isScrollingDown) {
+            let gesture = 'Pointing';
+            let emoji = '👆';
+
+            if (isLeftClicking) {
+                gesture = 'Left Click'; emoji = '🤏';
+                elements.clickState.textContent = 'L-CLICK';
+                elements.clickState.style.background = 'var(--accent-pink)';
+                elements.customCursor.classList.add('clicking');
+            } else if (isRightClicking) {
+                gesture = 'Right Click'; emoji = '🖖';
+                elements.clickState.textContent = 'R-CLICK';
+                elements.clickState.style.background = 'var(--accent-orange)';
+                elements.customCursor.classList.add('right-clicking');
+            } else if (isDragging) {
+                gesture = 'Dragging'; emoji = '✊';
+                elements.clickState.textContent = 'DRAG';
+                elements.clickState.style.background = '#10b981';
+            } else if (isScrollingUp) {
+                gesture = 'Scroll Up'; emoji = '👍';
+                elements.clickState.textContent = 'SCROLL ↑';
+                elements.clickState.style.background = 'var(--border-color)';
+            } else if (isScrollingDown) {
+                gesture = 'Scroll Down'; emoji = '👎';
+                elements.clickState.textContent = 'SCROLL ↓';
+                elements.clickState.style.background = 'var(--border-color)';
+            } else {
+                elements.clickState.textContent = 'Ready';
+                elements.clickState.style.background = 'var(--border-color)';
+                elements.customCursor.classList.remove('clicking', 'right-clicking');
+
+                const fingers = getFingerStates(landmarks);
+                const extendedCount = fingers.filter(Boolean).length;
+
+                if (extendedCount >= 4) { gesture = 'Open Palm'; emoji = '✋'; }
+                else if (extendedCount <= 1) { gesture = 'Fist'; emoji = '✊'; }
+                else if (extendedCount === 2 && fingers[1] && fingers[2]) { gesture = 'Peace'; emoji = '✌️'; }
+                else if (fingers[0] && fingers[4] && extendedCount === 2) { gesture = 'Hang Loose'; emoji = '🤙'; }
+            }
+
+            elements.gestureDisplay.innerHTML = `<span>${emoji}</span><p class="text-xs mt-1">${gesture}</p>`;
+        }
+
+        function performClick(type = 'left') {
+            const eventType = type === 'right' ? 'contextmenu' : 'click';
+            const event = new MouseEvent(eventType, {
+                clientX: state.targetPos.x,
+                clientY: state.targetPos.y,
+                bubbles: true,
+                button: type === 'right' ? 2 : 0
+            });
+            const el = document.elementFromPoint(state.targetPos.x, state.targetPos.y);
+            if (el && el !== elements.customCursor) {
+                el.dispatchEvent(event);
+                addLogEntry('Gesture', `${type.charAt(0).toUpperCase() + type.slice(1)} Click performed`);
+            }
+        }
+
+        async function startCamera() {
+            try {
+                await initHandTracking();
+                
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, facingMode: 'user' }
+                });
+
+                elements.videoElement.srcObject = stream;
+                elements.noCameraMsg.style.display = 'none';
+                elements.modeOverlay.style.opacity = '1';
+                state.cameraActive = true;
+                updateStatus('cameraStatus', true);
+                elements.startCameraBtn.textContent = 'Camera Active';
+                elements.startCameraBtn.disabled = true;
+
+                cameraInstance = new Camera(elements.videoElement, {
+                    onFrame: async () => {
+                        if (hands) await hands.send({ image: elements.videoElement });
+                    },
+                    width: 640,
+                    height: 480
+                });
+                cameraInstance.start();
+
+                addLogEntry('System', 'Camera started');
+
+            } catch (error) {
+                console.error('Camera error:', error);
+                addLogEntry('Error', 'Camera access denied');
+                alert('Cannot access camera. Please grant permission.');
+            }
+        }
+
+        
+        // VOICE RECOGNITION (ENHANCED DEBUG MODE)
+        
+        
+        let recognition = null;
+        let synthesis = window.speechSynthesis;
+        let voiceAnimInterval = null;
+
+        function initSpeechRecognition() {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            
+            // ALERT 1: Browser check
+            if (!SR) {
+                alert("🚨 VOICE ERROR: Your browser does not support the Web Speech API. You MUST use Google Chrome or Microsoft Edge for voice commands to work. Brave and Firefox usually block this feature.");
+                addLogEntry('Error', 'Browser not supported for voice.');
+                return false;
+            }
+
+            recognition = new SR();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                console.log("[VOICE] Microphone activated successfully!");
+                state.voiceActive = true;
+                updateStatus('voiceStatus', true, true);
+                elements.startVoiceBtn.disabled = true;
+                elements.stopVoiceBtn.disabled = false;
+                elements.currentCommand.textContent = 'Listening (Speak now)...';
+                startVoiceAnimation();
+                addLogEntry('System', 'Voice recognition active');
+            };
+
+            recognition.onresult = (event) => {
+                let interim = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        processVoiceCommand(transcript.toLowerCase().trim());
+                    } else {
+                        interim += transcript;
+                    }
+                }
+                if (interim) {
+                    elements.currentCommand.innerHTML = `<span style="color:var(--accent-cyan)">${interim}</span>`;
+                }
+            };
+
+            recognition.onerror = e => {
+                console.error("[VOICE ERROR]", e.error);
+                
+                // ALERT 2: Permission check
+                if (e.error === 'not-allowed') {
+                    alert("🚨 MIC DENIED: The browser blocked microphone access! Click the tiny lock/camera icon next to 'localhost:5000' in your URL bar and allow the microphone.");
+                    addLogEntry('Error', 'Mic permission denied');
+                    stopVoiceRecognition();
+                } else if (e.error === 'no-speech') {
+                    // Ignore, just means room is quiet
+                } else {
+                    addLogEntry('Error', `Voice error: ${e.error}`);
+                }
+            };
+
+            recognition.onend = () => {
+                if (state.voiceActive) {
+                    try { recognition.start(); } catch(e){}
+                }
+            };
+
+            return true;
+        }
+
+        function processVoiceCommand(cmd) {
+            elements.currentCommand.textContent = `"${cmd}"`;
+            addLogEntry('Voice', cmd);
+
+            if (cmd.toLowerCase().startsWith("ask ai")) {
+                const question = cmd.substring(6).trim();
+                askGemini(question);
+                return; // Stop here so it doesn't try to open an app
+            }
+            
+
+            // Send command to the Python Server
+            fetch('/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: cmd })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    speak(data.result);
+                    addLogEntry('Action', data.result);
+                } else {
+                    speak("I couldn't do that.");
+                    addLogEntry('Error', data.result);
+                }
+            })
+            .catch(err => {
+                console.error("[BACKEND ERROR]", err);
+                addLogEntry('Error', 'Cannot connect to Python backend.');
+                // ALERT 3: Connection check
+                alert("🚨 CONNECTION ERROR: The browser couldn't talk to app.py. Is the black terminal window still open?");
+                speak("Connection to server failed.");
+            });
+        }
+
+        function speak(text) {
+            if (state.settings.voiceFeedback && synthesis) {
+                synthesis.cancel();
+                const u = new SpeechSynthesisUtterance(text);
+                u.rate = 1.1;
+                synthesis.speak(u);
+            }
+        }
+
+        function startVoiceRecognition() {
+            console.log("[VOICE] Start button clicked");
+            if (!recognition && !initSpeechRecognition()) return;
+            try { recognition.start(); } catch(e){ console.error(e); }
+        }
+
+        function stopVoiceRecognition() {
+            state.voiceActive = false;
+            if (recognition) recognition.stop();
+            updateStatus('voiceStatus', false);
+            elements.startVoiceBtn.disabled = false;
+            elements.stopVoiceBtn.disabled = true;
+            elements.currentCommand.textContent = 'Stopped';
+            stopVoiceAnimation();
+            addLogEntry('System', 'Voice stopped');
+        }
+
+        function startVoiceAnimation() {
+            const bars = elements.voiceVisualizer.querySelectorAll('.voice-bar');
+            voiceAnimInterval = setInterval(() => {
+                bars.forEach(b => b.style.height = `${Math.random()*36+6}px`);
+            }, 70);
+        }
+
+        function stopVoiceAnimation() {
+            if (voiceAnimInterval) clearInterval(voiceAnimInterval);
+            elements.voiceVisualizer.querySelectorAll('.voice-bar').forEach((b,i) => {
+                b.style.height = `${6+(i%3)*8}px`;
+            });
+        }
+
+        
+        // MODE SWITCHING
+        
+
+        function enableSignMode() {
+            state.currentMode = 'sign';
+            state.signModeEnabled = true;
+            
+            document.querySelectorAll('.mode-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.mode === 'sign');
+                t.classList.toggle('sign-active', t.dataset.mode === 'sign');
+            });
+            
+            elements.toggleSignModeBtn.textContent = 'Disable Sign Language Mode';
+            elements.toggleSignModeBtn.classList.add('active');
+            elements.modeOverlay.textContent = 'SIGN LANGUAGE MODE';
+            elements.modeOverlay.style.background = 'rgba(155, 93, 229, 0.8)';
+            
+            addLogEntry('System', 'Sign Language mode enabled');
+            speak('Sign language typing enabled');
+        }
+
+        function disableSignMode() {
+            state.currentMode = 'cursor';
+            state.signModeEnabled = false;
+            
+            document.querySelectorAll('.mode-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.mode === 'cursor');
+                t.classList.remove('sign-active');
+            });
+            
+            elements.toggleSignModeBtn.textContent = 'Enable Sign Language Mode';
+            elements.toggleSignModeBtn.classList.remove('active');
+            elements.modeOverlay.textContent = 'CURSOR MODE';
+            elements.modeOverlay.style.background = 'rgba(0, 245, 212, 0.8)';
+            
+            elements.signLetterDisplay.textContent = '-';
+            elements.customCursor.classList.remove('typing');
+            
+            addLogEntry('System', 'Cursor mode enabled');
+            speak('Cursor control enabled');
+        }
+
+        
+        // UI HELPERS
+        
+
+        function updateStatus(elId, isActive, isSpecial = false) {
+            const el = elements[elId];
+            el.className = 'status-dot ' + (
+                isSpecial ? 'status-listening' : 
+                isActive ? 'status-active' : 'status-inactive'
+            );
+        }
+
+        function addLogEntry(type, msg) {
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            const colors = {
+                System: 'var(--accent-cyan)',
+                Voice: 'var(--accent-orange)',
+                Gesture: '#a78bfa',
+                Sign: 'var(--accent-purple)',
+                Action: '#34d399',
+                Error: '#f87171',
+                Unknown: 'var(--text-muted)'
+            };
+
+            entry.innerHTML = `
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-xs font-semibold" style="color:${colors[type]||colors.System}">${type}</span>
+                    <span class="text-xs" style="color:var(--text-muted)">${time}</span>
+                </div>
+                <p class="text-sm">${msg}</p>
+            `;
+
+            const ph = elements.commandLog.querySelector('.text-center');
+            if (ph) ph.remove();
+            elements.commandLog.insertBefore(entry, elements.commandLog.firstChild);
+
+            while (elements.commandLog.children.length > 50) {
+                elements.commandLog.removeChild(elements.commandLog.lastChild);
+            }
+        }
+
+        
+        // EVENT LISTENERS
+        
+
+        elements.startCameraBtn.addEventListener('click', startCamera);
+        elements.startVoiceBtn.addEventListener('click', startVoiceRecognition);
+        elements.stopVoiceBtn.addEventListener('click', stopVoiceRecognition);
+        elements.clearLogBtn.addEventListener('click', () => {
+            elements.commandLog.innerHTML = '<div class="text-center py-6" style="color:var(--text-muted)"><p class="text-sm">No activity yet</p></div>';
+        });
+
+        elements.toggleSignModeBtn.addEventListener('click', () => {
+            state.signModeEnabled ? disableSignMode() : enableSignMode();
+        });
+
+        document.querySelectorAll('.mode-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                if (tab.dataset.mode === 'sign') enableSignMode();
+                else disableSignMode();
+            });
+        });
+
+        // Makes the quick command buttons ping the Python server too
+        document.querySelectorAll('.quick-cmd').forEach(btn => {
+            btn.addEventListener('click', () => processVoiceCommand(btn.dataset.command));
+        });
+
+        elements.clearTextBtn.addEventListener('click', () => {
+            state.typedText = '';
+            updateTypedTextDisplay();
+            state.recentLetters = [];
+            updateRecentLettersDisplay();
+            addLogEntry('Sign', 'Text cleared');
+        });
+
+        elements.backspaceBtn.addEventListener('click', () => {
+            state.typedText = state.typedText.slice(0, -1);
+            updateTypedTextDisplay();
+        });
+
+        elements.spaceBtn.addEventListener('click', () => {
+            addTypedLetter(' ');
+        });
+
+        document.querySelectorAll('.toggle-switch').forEach(toggle => {
+            toggle.addEventListener('click', () => {
+                const setting = toggle.dataset.setting;
+                toggle.classList.toggle('active');
+                state.settings[setting] = toggle.classList.contains('active');
+                toggle.setAttribute('aria-checked', state.settings[setting]);
+            });
+            toggle.addEventListener('keydown', e => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle.click(); }
+            });
+        });
+
+        elements.sensitivitySlider.addEventListener('input', e => {
+            state.settings.sensitivity = parseInt(e.target.value);
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (!state.handDetected || state.currentMode !== 'cursor') {
+                state.targetPos.x = e.clientX;
+                state.targetPos.y = e.clientY;
+            }
+        });
+
+        document.addEventListener('mousedown', () => elements.customCursor.classList.add('clicking'));
+        document.addEventListener('mouseup', () => elements.customCursor.classList.remove('clicking'));
+
+        document.addEventListener('keydown', e => {
+            if (e.ctrlKey && e.shiftKey && e.key === 'V') { e.preventDefault(); state.voiceActive ? stopVoiceRecognition() : startVoiceRecognition(); }
+            if (e.ctrlKey && e.shiftKey && e.key === 'C') { e.preventDefault(); if(!state.cameraActive) startCamera(); }
+            if (e.ctrlKey && e.shiftKey && e.key === 'S') { e.preventDefault(); state.signModeEnabled ? disableSignMode() : enableSignMode(); }
+        });
+
+        window.addEventListener('resize', () => {
+            state.targetPos.x = Math.min(state.targetPos.x, window.innerWidth);
+            state.targetPos.y = Math.min(state.targetPos.y, window.innerHeight);
+        });
+
+        setTimeout(() => {
+            addLogEntry('System', 'Neural Control Pro ready.');
+        }, 400);
+        
+        // For Gemini Integration
+
+        function addChatMessage(sender, text) {
+            const box = $('chatBox');
+            if (box.children.length === 1 && box.children[0].style.textAlign === 'center') {
+                box.innerHTML = '';
+            }
+            
+            const msg = document.createElement('div');
+            msg.style.padding = '8px 12px';
+            msg.style.borderRadius = '8px';
+            msg.style.fontSize = '13px';
+            msg.style.maxWidth = '90%';
+            msg.style.animation = 'slideIn 0.3s ease';
+            
+            if (sender === 'user') {
+                msg.style.alignSelf = 'flex-end';
+                msg.style.background = 'rgba(0, 245, 212, 0.15)';
+                msg.style.border = '1px solid rgba(0, 245, 212, 0.3)';
+                msg.style.marginLeft = 'auto';
+            } else {
+                msg.style.alignSelf = 'flex-start';
+                msg.style.background = 'rgba(155, 93, 229, 0.15)';
+                msg.style.border = '1px solid rgba(155, 93, 229, 0.3)';
+            }
+            
+            msg.textContent = text;
+            box.appendChild(msg);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function askGemini(question) {
+            addChatMessage('user', question);
+            elements.currentCommand.textContent = "Asking Gemini...";
+            
+            fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: question })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) {
+                    addChatMessage('ai', data.result);
+                    speak(data.result);
+                    addLogEntry('AI', 'Generated response');
+                } else {
+                    addChatMessage('ai', "Error: " + data.result);
+                    addLogEntry('Error', 'AI failed to respond');
+                }
+            }).catch(err => {
+                addChatMessage('ai', "Backend disconnected.");
+                console.error(err);
+            });
+        }
+
+        $('sendChatBtn').addEventListener('click', () => {
+            const input = $('manualChatInput');
+            if(input.value.trim()) {
+                askGemini(input.value.trim());
+                input.value = '';
+            }
+        });
+
+        $('manualChatInput').addEventListener('keypress', (e) => {
+            if(e.key === 'Enter') $('sendChatBtn').click();
+        });
+
+
+    </script>
+</body>
+</html>
