@@ -60,7 +60,7 @@ A dedicated mode that translates static finger-spelling (ASL-inspired) directly 
 * **Python 3.8+** installed on your system.
 * A working **Webcam** and **Microphone**.
 * **Google Chrome** or **Microsoft Edge** (Required for the Web Speech API).
-* A free **Gemini API Key** from [Google AI Studio](https://aistudio.google.com/).
+* A free **Gemini API Key** from [Google AI Studio](https://aistudio.google.com/). use this key in line 12 of app.py to run ur ai 
 
 ### 2. Install Dependencies
 Open your terminal or command prompt and install the required Python packages:
