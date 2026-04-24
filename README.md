@@ -68,6 +68,8 @@ Open your terminal or command prompt and install the required Python packages:
 pip install flask flask-cors pyautogui google-generativeai webbrowser
 
 ```
+### 3. RUN 
+Put all 3 files (index.html, app.py, Start_App.bat) inside one folder and then run the Start_App.bat file then open "http://localhost:5000"
 
 ---
 
