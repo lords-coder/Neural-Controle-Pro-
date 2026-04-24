@@ -66,3 +66,12 @@ A dedicated mode that translates static finger-spelling (ASL-inspired) directly 
 Open your terminal or command prompt and install the required Python packages:
 ```bash
 pip install flask flask-cors pyautogui google-generativeai webbrowser
+
+```
+
+---
+
+##👨‍💻 Author: 
+
+**Developed and engineered by: -**
+**Tanmay Verma**
