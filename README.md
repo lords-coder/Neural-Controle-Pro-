@@ -1,6 +1,6 @@
 # Neural-Controle-Pro-
-Voice / Gesture / Sign Language Interface v3.2
-# Neural Control Pro v3.2
+Voice / Gesture / Sign Language Interface v1
+# Neural Control Pro v1
 
 ![Neural Control Pro](https://img.shields.io/badge/Status-Active-brightgreen) ![Version](https://img.shields.io/badge/Version-3.2-blue) ![License](https://img.shields.io/badge/License-MIT-purple)
 
