@@ -9,7 +9,7 @@ import pyautogui
 import webbrowser
 import google.generativeai as genai
 
-GOOGLE_API_KEY = "AIzaSyD2QePJHqQUParbDAlYnT_RKoCRPfP934c"
+GOOGLE_API_KEY = "YOUR GOOGLE API KEY !"
 
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
